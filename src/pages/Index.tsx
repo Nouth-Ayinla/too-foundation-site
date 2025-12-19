@@ -19,7 +19,7 @@ const focusAreas = [
 ];
 
 const stats = [
-  { num: 300, label: 'Survivors Supported', suffix: '+' },
+  { num: 3000, label: 'Survivors Supported', suffix: '+' },
   { num: 15, label: 'Partner Organizations' },
   { num: 43, label: 'Schools Reached', suffix: '+' },
   { num: 60, label: 'Volunteers & Mentors', suffix: '+' },
