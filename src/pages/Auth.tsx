@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
+const convexUrl = import.meta.env.VITE_CONVEX_URL;
+
 // Input validation helpers
 const validateEmail = (email: string): string | null => {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -27,7 +29,8 @@ const validateName = (name: string): string | null => {
 
 type AuthView = "signin" | "signup" | "forgot";
 
-const Auth = () => {
+// Inner component that uses Convex hooks (only rendered when Convex is available)
+const AuthWithConvex = () => {
   const navigate = useNavigate();
   const [view, setView] = useState<AuthView>("signin");
   const [email, setEmail] = useState("");
@@ -336,6 +339,24 @@ const Auth = () => {
       </div>
     </div>
   );
+};
+
+// Main Auth component that checks for Convex availability
+const Auth = () => {
+  if (!convexUrl) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-8">
+        <div className="text-center max-w-md">
+          <h1 className="text-2xl font-bold text-foreground mb-4">Configuration Required</h1>
+          <p className="text-muted-foreground">
+            Authentication is not available. Please configure Convex to enable this feature.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return <AuthWithConvex />;
 };
 
 export default Auth;
