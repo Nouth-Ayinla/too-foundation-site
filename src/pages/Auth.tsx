@@ -1,9 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation } from "convex/react";
+import { useMutation, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
+
+// Timeout duration in milliseconds
+const MUTATION_TIMEOUT = 15000;
 
 // Input validation helpers
 const validateEmail = (email: string): string | null => {
@@ -27,11 +30,23 @@ const validateName = (name: string): string | null => {
   return null;
 };
 
+// Wrapper to add timeout to async operations
+const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error("Connection timeout. Please check your internet and try again.")), ms)
+    ),
+  ]);
+};
+
 type AuthView = "signin" | "signup" | "forgot";
+type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "error";
 
 // Inner component that uses Convex hooks (only rendered when Convex is available)
 const AuthWithConvex = () => {
   const navigate = useNavigate();
+  const convex = useConvex();
   const [view, setView] = useState<AuthView>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,10 +55,57 @@ const AuthWithConvex = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  const [retryCount, setRetryCount] = useState(0);
 
   const signup = useMutation(api.auth.signup);
   const signin = useMutation(api.auth.signin);
   const requestPasswordReset = useMutation(api.passwordReset.requestPasswordReset);
+
+  // Monitor connection status
+  useEffect(() => {
+    let mounted = true;
+    let connectionCheckInterval: NodeJS.Timeout;
+
+    const checkConnection = async () => {
+      try {
+        // Try a simple query to check connection
+        await withTimeout(
+          convex.query(api.auth.getCurrentUser, { email: "connection-test@test.com" }),
+          5000
+        );
+        if (mounted) setConnectionStatus("connected");
+      } catch (err) {
+        if (mounted) {
+          setConnectionStatus((prev) => (prev === "connected" ? "reconnecting" : "connecting"));
+        }
+      }
+    };
+
+    // Initial check
+    checkConnection();
+
+    // Periodic check every 10 seconds
+    connectionCheckInterval = setInterval(checkConnection, 10000);
+
+    return () => {
+      mounted = false;
+      clearInterval(connectionCheckInterval);
+    };
+  }, [convex]);
+
+  const handleRetry = useCallback(() => {
+    setRetryCount((prev) => prev + 1);
+    setError("");
+    setConnectionStatus("reconnecting");
+    
+    // Force a connection check
+    setTimeout(() => {
+      convex.query(api.auth.getCurrentUser, { email: "connection-test@test.com" })
+        .then(() => setConnectionStatus("connected"))
+        .catch(() => setConnectionStatus("error"));
+    }, 1000);
+  }, [convex]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,21 +122,27 @@ const AuthWithConvex = () => {
 
     try {
       if (view === "forgot") {
-        // Request password reset
-        const result = await requestPasswordReset({ email: email.trim() });
+        // Request password reset with timeout
+        const result = await withTimeout(
+          requestPasswordReset({ email: email.trim() }),
+          MUTATION_TIMEOUT
+        );
         
         if (result.token) {
           // Send email via HTTP action
           const resetUrl = `${window.location.origin}/reset-password`;
-          await fetch(`${import.meta.env.VITE_CONVEX_URL?.replace('.cloud', '.site')}/send-reset-email`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: email.trim(),
-              token: result.token,
-              resetUrl,
+          await withTimeout(
+            fetch(`${import.meta.env.VITE_CONVEX_URL?.replace('.cloud', '.site')}/send-reset-email`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: email.trim(),
+                token: result.token,
+                resetUrl,
+              }),
             }),
-          });
+            MUTATION_TIMEOUT
+          );
         }
         
         setSuccess(true);
@@ -95,11 +163,14 @@ const AuthWithConvex = () => {
           return;
         }
 
-        const user = await signup({ 
-          email: email.trim(), 
-          password, 
-          name: name.trim() 
-        });
+        const user = await withTimeout(
+          signup({ 
+            email: email.trim(), 
+            password, 
+            name: name.trim() 
+          }),
+          MUTATION_TIMEOUT
+        );
         
         localStorage.setItem("user", JSON.stringify(user));
         setSuccess(true);
@@ -117,10 +188,13 @@ const AuthWithConvex = () => {
           return;
         }
 
-        const user = await signin({ 
-          email: email.trim(), 
-          password 
-        });
+        const user = await withTimeout(
+          signin({ 
+            email: email.trim(), 
+            password 
+          }),
+          MUTATION_TIMEOUT
+        );
         
         localStorage.setItem("user", JSON.stringify(user));
         setSuccess(true);
@@ -135,7 +209,18 @@ const AuthWithConvex = () => {
         }, 500);
       }
     } catch (err: any) {
-      setError(err.message || "An error occurred");
+      const errorMessage = err.message || "An error occurred";
+      
+      // Provide user-friendly error messages
+      if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
+        setError("Connection timeout. Please check your internet connection and try again.");
+        setConnectionStatus("reconnecting");
+      } else if (errorMessage.includes("network") || errorMessage.includes("Network")) {
+        setError("Network error. Please check your internet connection.");
+        setConnectionStatus("error");
+      } else {
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }
@@ -147,6 +232,22 @@ const AuthWithConvex = () => {
     setSuccess(false);
     setSuccessMessage("");
   };
+
+  const getConnectionStatusDisplay = () => {
+    switch (connectionStatus) {
+      case "connecting":
+        return { text: "Connecting...", color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" };
+      case "reconnecting":
+        return { text: "Reconnecting...", color: "text-orange-600", bg: "bg-orange-50 border-orange-200" };
+      case "error":
+        return { text: "Connection issues", color: "text-red-600", bg: "bg-red-50 border-red-200" };
+      case "connected":
+      default:
+        return null;
+    }
+  };
+
+  const statusDisplay = getConnectionStatusDisplay();
 
   return (
     <div className="min-h-screen flex">
@@ -215,9 +316,39 @@ const AuthWithConvex = () => {
               : "Please enter your credentials to sign in!"}
           </p>
 
+          {/* Connection Status Indicator */}
+          {statusDisplay && (
+            <div className={`mb-4 p-3 border rounded flex items-center justify-between ${statusDisplay.bg}`}>
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full animate-pulse ${connectionStatus === "connected" ? "bg-green-500" : connectionStatus === "error" ? "bg-red-500" : "bg-yellow-500"}`} />
+                <span className={`text-sm ${statusDisplay.color}`}>{statusDisplay.text}</span>
+              </div>
+              {(connectionStatus === "error" || connectionStatus === "reconnecting") && (
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="text-sm text-green hover:text-green-dark font-medium"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+
           {error && (
             <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded">
-              {error}
+              <div className="flex items-center justify-between">
+                <span>{error}</span>
+                {error.includes("timeout") || error.includes("Connection") ? (
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="text-sm text-red-800 hover:text-red-900 font-medium underline ml-2"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </div>
             </div>
           )}
 
@@ -299,12 +430,18 @@ const AuthWithConvex = () => {
 
             <button
               type="submit"
-              className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={loading}
+              className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              disabled={loading || connectionStatus === "error"}
             >
-              {loading 
-                ? "Loading..." 
-                : view === "signup" 
+              {loading ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>{connectionStatus === "reconnecting" ? "Reconnecting..." : "Please wait..."}</span>
+                </>
+              ) : view === "signup" 
                 ? "Create Account" 
                 : view === "forgot"
                 ? "Send Reset Link"
