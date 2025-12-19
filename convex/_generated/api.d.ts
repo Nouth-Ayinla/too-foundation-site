@@ -12,6 +12,8 @@ import type * as auth from "../auth.js";
 import type * as blogs from "../blogs.js";
 import type * as events from "../events.js";
 import type * as gallery from "../gallery.js";
+import type * as passwordReset from "../passwordReset.js";
+import type * as http from "../http.js";
 
 import type {
   ApiFromModules,
@@ -24,6 +26,8 @@ declare const fullApi: ApiFromModules<{
   blogs: typeof blogs;
   events: typeof events;
   gallery: typeof gallery;
+  passwordReset: typeof passwordReset;
+  http: typeof http;
 }>;
 
 /**
