@@ -1,8 +1,32 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
+// Input validation helpers
+const validateEmail = (email: string): string | null => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!email.trim()) return "Email is required";
+  if (!emailRegex.test(email)) return "Please enter a valid email address";
+  if (email.length > 255) return "Email must be less than 255 characters";
+  return null;
+};
+
+const validatePassword = (password: string): string | null => {
+  if (!password) return "Password is required";
+  if (password.length < 6) return "Password must be at least 6 characters";
+  if (password.length > 100) return "Password must be less than 100 characters";
+  return null;
+};
+
+const validateName = (name: string): string | null => {
+  if (!name.trim()) return "Name is required";
+  if (name.length > 100) return "Name must be less than 100 characters";
+  return null;
+};
+
 const Auth = () => {
+  const navigate = useNavigate();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,36 +43,62 @@ const Auth = () => {
     setError("");
     setLoading(true);
 
+    // Validate inputs
+    const emailError = validateEmail(email);
+    if (emailError) {
+      setError(emailError);
+      setLoading(false);
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
+      setLoading(false);
+      return;
+    }
+
     try {
       if (isSignUp) {
-        // Sign up
-        if (!name.trim()) {
-          setError("Please enter your name");
+        // Validate name for signup
+        const nameError = validateName(name);
+        if (nameError) {
+          setError(nameError);
           setLoading(false);
           return;
         }
-        const user = await signup({ email, password, name });
+
+        // Sign up
+        const user = await signup({ 
+          email: email.trim(), 
+          password, 
+          name: name.trim() 
+        });
+        
+        // Auto-login after successful signup
+        localStorage.setItem("user", JSON.stringify(user));
         setSuccess(true);
+        
+        // Redirect to admin dashboard
         setTimeout(() => {
-          setSuccess(false);
-          setIsSignUp(false);
-          setEmail("");
-          setPassword("");
-          setName("");
-        }, 2000);
+          navigate("/admin");
+        }, 500);
       } else {
         // Sign in
-        const user = await signin({ email, password });
-        // Use returned user (signin returns role); avoid unsupported `useClient` hook
-        const storeUser = user;
-        localStorage.setItem("user", JSON.stringify(storeUser));
+        const user = await signin({ 
+          email: email.trim(), 
+          password 
+        });
+        
+        localStorage.setItem("user", JSON.stringify(user));
         setSuccess(true);
-        // Redirect to dashboard
+        
+        // Redirect based on role
         setTimeout(() => {
-          if (storeUser.role === "admin") {
-            window.location.href = "/admin";
+          if (user.role === "admin") {
+            navigate("/admin");
           } else {
-            window.location.href = "/";
+            navigate("/");
           }
         }, 500);
       }
@@ -133,8 +183,8 @@ const Auth = () => {
           {success && (
             <div className="mb-4 p-3 bg-green-100 border border-green-300 text-green-700 rounded">
               {isSignUp
-                ? "Account created! Please sign in."
-                : "Signed in successfully!"}
+                ? "Account created! Redirecting..."
+                : "Signed in successfully! Redirecting..."}
             </div>
           )}
 
@@ -152,6 +202,7 @@ const Auth = () => {
                   className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
                   required
                   disabled={loading}
+                  maxLength={100}
                 />
               </div>
             )}
@@ -168,6 +219,7 @@ const Auth = () => {
                 className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
                 required
                 disabled={loading}
+                maxLength={255}
               />
             </div>
 
@@ -183,6 +235,7 @@ const Auth = () => {
                 className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
                 required
                 disabled={loading}
+                maxLength={100}
               />
               {isSignUp && (
                 <small className="text-muted-foreground block mt-1">

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import "./AdminDashboard.css";
@@ -10,6 +11,7 @@ interface AdminDashboardProps {
 type DashboardTab = "blogs" | "events" | "gallery" | "users";
 
 const AdminDashboard: React.FC<AdminDashboardProps> = ({ userEmail }) => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<DashboardTab>("blogs");
   const [showCreateModal, setShowCreateModal] = useState(false);
 
@@ -36,6 +38,11 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ userEmail }) => {
 
   const promoteToAdmin = useMutation(api.auth.promoteToAdmin);
   const demoteFromAdmin = useMutation(api.auth.demoteFromAdmin);
+
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    navigate("/auth");
+  };
 
   return (
     <div className="admin-dashboard">
@@ -69,6 +76,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ userEmail }) => {
             👥 Users
           </button>
         </nav>
+        <div className="mt-auto p-4">
+          <button
+            onClick={handleLogout}
+            className="nav-item w-full text-left text-red-500 hover:bg-red-50"
+          >
+            🚪 Logout
+          </button>
+        </div>
       </div>
 
       <div className="admin-content">
