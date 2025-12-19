@@ -6,6 +6,9 @@ import "./index.css";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
 
+// Debug: Check if Convex URL is loaded (remove after confirming)
+console.log("Convex URL loaded:", convexUrl ? "✓ Connected" : "✗ Not configured");
+
 const convex = convexUrl ? new ConvexReactClient(convexUrl) : null;
 
 if (!convexUrl) {
