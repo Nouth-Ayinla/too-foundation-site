@@ -25,25 +25,29 @@ const validateName = (name: string): string | null => {
   return null;
 };
 
+type AuthView = "signin" | "signup" | "forgot";
+
 const Auth = () => {
   const navigate = useNavigate();
-  const [isSignUp, setIsSignUp] = useState(false);
+  const [view, setView] = useState<AuthView>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const signup = useMutation(api.auth.signup);
   const signin = useMutation(api.auth.signin);
+  const requestPasswordReset = useMutation(api.passwordReset.requestPasswordReset);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    // Validate inputs
+    // Validate email
     const emailError = validateEmail(email);
     if (emailError) {
       setError(emailError);
@@ -51,16 +55,36 @@ const Auth = () => {
       return;
     }
 
-    const passwordError = validatePassword(password);
-    if (passwordError) {
-      setError(passwordError);
-      setLoading(false);
-      return;
-    }
-
     try {
-      if (isSignUp) {
-        // Validate name for signup
+      if (view === "forgot") {
+        // Request password reset
+        const result = await requestPasswordReset({ email: email.trim() });
+        
+        if (result.token) {
+          // Send email via HTTP action
+          const resetUrl = `${window.location.origin}/reset-password`;
+          await fetch(`${import.meta.env.VITE_CONVEX_URL?.replace('.cloud', '.site')}/send-reset-email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: email.trim(),
+              token: result.token,
+              resetUrl,
+            }),
+          });
+        }
+        
+        setSuccess(true);
+        setSuccessMessage("If an account exists with this email, you will receive a password reset link shortly.");
+      } else if (view === "signup") {
+        // Validate password and name for signup
+        const passwordError = validatePassword(password);
+        if (passwordError) {
+          setError(passwordError);
+          setLoading(false);
+          return;
+        }
+
         const nameError = validateName(name);
         if (nameError) {
           setError(nameError);
@@ -68,23 +92,28 @@ const Auth = () => {
           return;
         }
 
-        // Sign up
         const user = await signup({ 
           email: email.trim(), 
           password, 
           name: name.trim() 
         });
         
-        // Auto-login after successful signup
         localStorage.setItem("user", JSON.stringify(user));
         setSuccess(true);
+        setSuccessMessage("Account created! Redirecting...");
         
-        // Redirect to admin dashboard
         setTimeout(() => {
           navigate("/admin");
         }, 500);
       } else {
         // Sign in
+        const passwordError = validatePassword(password);
+        if (passwordError) {
+          setError(passwordError);
+          setLoading(false);
+          return;
+        }
+
         const user = await signin({ 
           email: email.trim(), 
           password 
@@ -92,8 +121,8 @@ const Auth = () => {
         
         localStorage.setItem("user", JSON.stringify(user));
         setSuccess(true);
+        setSuccessMessage("Signed in successfully! Redirecting...");
         
-        // Redirect based on role
         setTimeout(() => {
           if (user.role === "admin") {
             navigate("/admin");
@@ -107,6 +136,13 @@ const Auth = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const switchView = (newView: AuthView) => {
+    setView(newView);
+    setError("");
+    setSuccess(false);
+    setSuccessMessage("");
   };
 
   return (
@@ -166,11 +202,13 @@ const Auth = () => {
           </div>
 
           <h1 className="text-3xl font-bold text-foreground mb-2">
-            {isSignUp ? "Create Account" : "Welcome back!"}
+            {view === "signup" ? "Create Account" : view === "forgot" ? "Reset Password" : "Welcome back!"}
           </h1>
           <p className="text-muted-foreground mb-8">
-            {isSignUp
+            {view === "signup"
               ? "Please fill in your details to create an account"
+              : view === "forgot"
+              ? "Enter your email and we'll send you a reset link"
               : "Please enter your credentials to sign in!"}
           </p>
 
@@ -182,14 +220,12 @@ const Auth = () => {
 
           {success && (
             <div className="mb-4 p-3 bg-green-100 border border-green-300 text-green-700 rounded">
-              {isSignUp
-                ? "Account created! Redirecting..."
-                : "Signed in successfully! Redirecting..."}
+              {successMessage}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {isSignUp && (
+            {view === "signup" && (
               <div>
                 <label className="block text-sm font-medium text-foreground mb-2">
                   Full Name
@@ -223,51 +259,78 @@ const Auth = () => {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
-                required
-                disabled={loading}
-                maxLength={100}
-              />
-              {isSignUp && (
-                <small className="text-muted-foreground block mt-1">
-                  At least 6 characters
-                </small>
-              )}
-            </div>
+            {view !== "forgot" && (
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
+                  required
+                  disabled={loading}
+                  maxLength={100}
+                />
+                {view === "signup" && (
+                  <small className="text-muted-foreground block mt-1">
+                    At least 6 characters
+                  </small>
+                )}
+              </div>
+            )}
+
+            {view === "signin" && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => switchView("forgot")}
+                  className="text-sm text-green hover:text-green-dark transition-colors"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             <button
               type="submit"
               className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={loading}
             >
-              {loading ? "Loading..." : isSignUp ? "Create Account" : "Sign In"}
+              {loading 
+                ? "Loading..." 
+                : view === "signup" 
+                ? "Create Account" 
+                : view === "forgot"
+                ? "Send Reset Link"
+                : "Sign In"}
             </button>
           </form>
 
-          <div className="mt-6 text-center">
-            <button
-              type="button"
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setError("");
-                setSuccess(false);
-              }}
-              disabled={loading}
-              className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSignUp
-                ? "Already have an account? Sign In"
-                : "Don't have an account? Sign Up"}
-            </button>
+          <div className="mt-6 text-center space-y-2">
+            {view === "forgot" ? (
+              <button
+                type="button"
+                onClick={() => switchView("signin")}
+                disabled={loading}
+                className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Back to Sign In
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => switchView(view === "signup" ? "signin" : "signup")}
+                disabled={loading}
+                className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {view === "signup"
+                  ? "Already have an account? Sign In"
+                  : "Don't have an account? Sign Up"}
+              </button>
+            )}
           </div>
         </div>
       </div>

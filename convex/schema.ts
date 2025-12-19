@@ -84,4 +84,15 @@ export default defineSchema({
   })
     .index("by_event", ["event_id"])
     .index("by_email", ["user_email"]),
+
+  // Password Reset Tokens table
+  password_reset_tokens: defineTable({
+    email: v.string(),
+    token: v.string(),
+    expires_at: v.number(),
+    used: v.boolean(),
+    created_at: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_token", ["token"]),
 });
