@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
+const convexUrl = import.meta.env.VITE_CONVEX_URL;
+
 const validatePassword = (password: string): string | null => {
   if (!password) return "Password is required";
   if (password.length < 6) return "Password must be at least 6 characters";
@@ -10,7 +12,7 @@ const validatePassword = (password: string): string | null => {
   return null;
 };
 
-const ResetPassword = () => {
+const ResetPasswordWithConvex = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") || "";
@@ -191,6 +193,32 @@ const ResetPassword = () => {
       </div>
     </div>
   );
+};
+
+// Main component that checks for Convex availability
+const ResetPassword = () => {
+  const navigate = useNavigate();
+
+  if (!convexUrl) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-8">
+        <div className="text-center max-w-md">
+          <h1 className="text-2xl font-bold text-foreground mb-4">Configuration Required</h1>
+          <p className="text-muted-foreground mb-6">
+            Password reset is not available. Please configure Convex to enable this feature.
+          </p>
+          <button
+            onClick={() => navigate("/auth")}
+            className="px-6 py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors"
+          >
+            Back to Sign In
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <ResetPasswordWithConvex />;
 };
 
 export default ResetPassword;
