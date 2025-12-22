@@ -1,9 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
-
-const convexUrl = import.meta.env.VITE_CONVEX_URL;
 
 // Timeout duration in milliseconds
 const MUTATION_TIMEOUT = 15000;
@@ -41,7 +39,7 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
 };
 
 type AuthView = "signin" | "signup" | "forgot" | "verify-code" | "reset-password";
-type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "error";
+
 
 // Inner component that uses Convex hooks (only rendered when Convex is available)
 const AuthWithConvex = () => {
@@ -56,8 +54,6 @@ const AuthWithConvex = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
-  const [retryCount, setRetryCount] = useState(0);
   
   // OTP Code state
   const [otpCode, setOtpCode] = useState(["", "", "", "", "", ""]);
@@ -78,50 +74,6 @@ const AuthWithConvex = () => {
     }
   }, [resendCountdown]);
 
-  // Monitor connection status
-  useEffect(() => {
-    let mounted = true;
-    let connectionCheckInterval: NodeJS.Timeout;
-
-    const checkConnection = async () => {
-      try {
-        // Try a simple query to check connection
-        await withTimeout(
-          convex.query(api.auth.getCurrentUser, { email: "connection-test@test.com" }),
-          5000
-        );
-        if (mounted) setConnectionStatus("connected");
-      } catch (err) {
-        if (mounted) {
-          setConnectionStatus((prev) => (prev === "connected" ? "reconnecting" : "connecting"));
-        }
-      }
-    };
-
-    // Initial check
-    checkConnection();
-
-    // Periodic check every 10 seconds
-    connectionCheckInterval = setInterval(checkConnection, 10000);
-
-    return () => {
-      mounted = false;
-      clearInterval(connectionCheckInterval);
-    };
-  }, [convex]);
-
-  const handleRetry = useCallback(() => {
-    setRetryCount((prev) => prev + 1);
-    setError("");
-    setConnectionStatus("reconnecting");
-    
-    // Force a connection check
-    setTimeout(() => {
-      convex.query(api.auth.getCurrentUser, { email: "connection-test@test.com" })
-        .then(() => setConnectionStatus("connected"))
-        .catch(() => setConnectionStatus("error"));
-    }, 1000);
-  }, [convex]);
 
   // Handle OTP input change
   const handleOtpChange = (index: number, value: string) => {
@@ -384,10 +336,8 @@ const AuthWithConvex = () => {
       // Provide user-friendly error messages
       if (errorMessage.includes("timeout") || errorMessage.includes("Timeout")) {
         setError("Connection timeout. Please check your internet connection and try again.");
-        setConnectionStatus("reconnecting");
       } else if (errorMessage.includes("network") || errorMessage.includes("Network")) {
         setError("Network error. Please check your internet connection.");
-        setConnectionStatus("error");
       } else {
         setError(errorMessage);
       }
@@ -406,21 +356,6 @@ const AuthWithConvex = () => {
     setOtpCode(["", "", "", "", "", ""]);
   };
 
-  const getConnectionStatusDisplay = () => {
-    switch (connectionStatus) {
-      case "connecting":
-        return { text: "Connecting...", color: "text-yellow-600", bg: "bg-yellow-50 border-yellow-200" };
-      case "reconnecting":
-        return { text: "Reconnecting...", color: "text-orange-600", bg: "bg-orange-50 border-orange-200" };
-      case "error":
-        return { text: "Connection issues", color: "text-red-600", bg: "bg-red-50 border-red-200" };
-      case "connected":
-      default:
-        return null;
-    }
-  };
-
-  const statusDisplay = getConnectionStatusDisplay();
 
   const getTitle = () => {
     switch (view) {
@@ -505,39 +440,10 @@ const AuthWithConvex = () => {
             {getSubtitle()}
           </p>
 
-          {/* Connection Status Indicator */}
-          {statusDisplay && (
-            <div className={`mb-4 p-3 border rounded flex items-center justify-between ${statusDisplay.bg}`}>
-              <div className="flex items-center gap-2">
-                <div className={`w-2 h-2 rounded-full animate-pulse ${connectionStatus === "connected" ? "bg-green-500" : connectionStatus === "error" ? "bg-red-500" : "bg-yellow-500"}`} />
-                <span className={`text-sm ${statusDisplay.color}`}>{statusDisplay.text}</span>
-              </div>
-              {(connectionStatus === "error" || connectionStatus === "reconnecting") && (
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  className="text-sm text-green hover:text-green-dark font-medium"
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          )}
 
           {error && (
             <div className="mb-4 p-3 bg-red-100 border border-red-300 text-red-700 rounded">
-              <div className="flex items-center justify-between">
-                <span>{error}</span>
-                {error.includes("timeout") || error.includes("Connection") ? (
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    className="text-sm text-red-800 hover:text-red-900 font-medium underline ml-2"
-                  >
-                    Retry
-                  </button>
-                ) : null}
-              </div>
+              <span>{error}</span>
             </div>
           )}
 
@@ -749,7 +655,7 @@ const AuthWithConvex = () => {
               <button
                 type="submit"
                 className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                disabled={loading || connectionStatus === "error"}
+                disabled={loading}
               >
                 {loading ? (
                   <>
@@ -757,7 +663,7 @@ const AuthWithConvex = () => {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    <span>{connectionStatus === "reconnecting" ? "Reconnecting..." : "Please wait..."}</span>
+                    <span>Please wait...</span>
                   </>
                 ) : view === "signup" 
                   ? "Create Account" 
@@ -799,7 +705,9 @@ const AuthWithConvex = () => {
 
 // Wrapper component to check if Convex is configured
 const Auth = () => {
-  if (!convexUrl) {
+  const convexUrlCheck = import.meta.env.VITE_CONVEX_URL;
+  
+  if (!convexUrlCheck) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <div className="bg-destructive/10 border border-destructive/30 text-destructive p-6 rounded-lg max-w-md text-center">
