@@ -176,9 +176,15 @@ const AuthWithConvex = () => {
       );
       
       if (result.code) {
-        // Send email via HTTP action
-        await withTimeout(
-          fetch(`${import.meta.env.VITE_CONVEX_URL?.replace('.cloud', '.site')}/send-reset-email`, {
+        // Construct HTTP action URL from Convex URL
+        const convexUrl = import.meta.env.VITE_CONVEX_URL || "";
+        const httpUrl = convexUrl.replace(".cloud", ".site");
+        
+        console.log("Sending reset email to:", email.trim());
+        console.log("HTTP URL:", httpUrl);
+        
+        const response = await withTimeout(
+          fetch(`${httpUrl}/send-reset-email`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -188,6 +194,14 @@ const AuthWithConvex = () => {
           }),
           MUTATION_TIMEOUT
         );
+        
+        if (!response.ok) {
+          const errorData = await response.text();
+          console.error("Email send error:", errorData);
+          throw new Error("Failed to send reset email. Please try again.");
+        }
+        
+        console.log("Reset email sent successfully");
       }
       
       setView("verify-code");
@@ -196,6 +210,7 @@ const AuthWithConvex = () => {
       setSuccess(true);
       setSuccessMessage("A 6-digit code has been sent to your email.");
     } catch (err: any) {
+      console.error("Reset code error:", err);
       setError(err.message || "Failed to send reset code");
     } finally {
       setLoading(false);
