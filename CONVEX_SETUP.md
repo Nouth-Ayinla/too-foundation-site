@@ -274,6 +274,36 @@ Set these in your production environment:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` - Clerk public key
 - `CLERK_SECRET_KEY` - Clerk secret key
 
+### Email (Brevo) Configuration
+
+To enable password reset emails via Brevo:
+
+1. Create a Brevo account and generate an SMTP & API key.
+2. Verify your sender domain or email (e.g., noreply@tooffoundation.org) in Brevo.
+3. Set Convex environment variables on your active deployment (the one in `VITE_CONVEX_URL`):
+
+```bash
+# Ensure you are targeting the deployment used by VITE_CONVEX_URL
+# Option A: Use the Convex dashboard to set env vars for the deployment
+# Option B: Use the CLI after switching to the correct deployment
+
+# Required
+npx convex env set BREVO_API_KEY "<your_brevo_api_key>"
+
+# Optional (otherwise defaults to TOOF Foundation / noreply@tooffoundation.org)
+npx convex env set BREVO_SENDER_NAME "TOOF Foundation"
+npx convex env set BREVO_SENDER_EMAIL "noreply@tooffoundation.org"
+
+# Deploy functions so HTTP actions are live
+npx convex deploy
+```
+
+Notes:
+
+- The frontend calls `https://<deployment>.convex.site/send-reset-email` derived from `VITE_CONVEX_URL`.
+- If emails fail, check Convex logs for `BREVO_API_KEY not configured` or Brevo error details.
+- Make sure your sender is verified in Brevo; otherwise Brevo returns 400 with details.
+
 ## Troubleshooting
 
 ### "Module not found" errors

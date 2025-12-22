@@ -18,11 +18,16 @@ http.route({
       
       // @ts-ignore - process.env is available in Convex runtime
       const BREVO_API_KEY = process.env.BREVO_API_KEY;
+      // Optional overrides for sender configuration
+      // @ts-ignore
+      const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || "noreply@tooffoundation.org";
+      // @ts-ignore
+      const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || "TOOF Foundation";
       
       if (!BREVO_API_KEY) {
         console.error("BREVO_API_KEY not configured");
         return new Response(
-          JSON.stringify({ error: "Email service not configured" }),
+          JSON.stringify({ error: "Email service not configured", code: "MISSING_API_KEY" }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -36,8 +41,8 @@ http.route({
         },
         body: JSON.stringify({
           sender: {
-            name: "TOOF Foundation",
-            email: "noreply@tooffoundation.org", // Replace with your verified sender
+            name: BREVO_SENDER_NAME,
+            email: BREVO_SENDER_EMAIL,
           },
           to: [{ email }],
           subject: "Your Password Reset Code - TOOF Foundation",
@@ -87,10 +92,16 @@ http.route({
       });
 
       if (!response.ok) {
-        const errorData = await response.text();
-        console.error("Brevo API error:", errorData);
+        const text = await response.text();
+        let details: any = undefined;
+        try {
+          details = JSON.parse(text);
+        } catch (_e) {
+          details = { raw: text };
+        }
+        console.error("Brevo API error:", details);
         return new Response(
-          JSON.stringify({ error: "Failed to send email" }),
+          JSON.stringify({ error: "Failed to send email", details }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
