@@ -85,14 +85,15 @@ export default defineSchema({
     .index("by_event", ["event_id"])
     .index("by_email", ["user_email"]),
 
-  // Password Reset Tokens table
+  // Password Reset Codes table (6-digit OTP)
   password_reset_tokens: defineTable({
     email: v.string(),
-    token: v.string(),
+    code: v.string(), // 6-digit numeric code
     expires_at: v.number(),
     used: v.boolean(),
+    attempts: v.number(), // Track failed attempts
     created_at: v.number(),
   })
     .index("by_email", ["email"])
-    .index("by_token", ["token"]),
+    .index("by_code", ["code"]),
 });

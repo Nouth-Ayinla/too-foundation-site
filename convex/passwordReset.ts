@@ -1,14 +1,9 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 
-// Generate a random token
-function generateToken(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = '';
-  for (let i = 0; i < 32; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
+// Generate a 6-digit numeric code
+function generateCode(): string {
+  return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 // Hash password (same as in auth.ts)
@@ -16,7 +11,7 @@ function hashPassword(password: string): string {
   return btoa(password);
 }
 
-// Request password reset - creates token
+// Request password reset - creates 6-digit code
 export const requestPasswordReset = mutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
@@ -30,98 +25,144 @@ export const requestPasswordReset = mutation({
     
     if (!user) {
       // Don't reveal if user exists - return success anyway
-      return { success: true, message: "If an account exists, a reset email will be sent." };
+      return { success: true, message: "If an account exists, a reset code will be sent." };
     }
     
-    // Invalidate any existing tokens for this email
-    const existingTokens = await ctx.db
+    // Invalidate any existing codes for this email
+    const existingCodes = await ctx.db
       .query("password_reset_tokens")
       .withIndex("by_email", (q) => q.eq("email", email))
       .collect();
     
-    for (const token of existingTokens) {
-      await ctx.db.patch(token._id, { used: true });
+    for (const codeRecord of existingCodes) {
+      await ctx.db.patch(codeRecord._id, { used: true });
     }
     
-    // Generate new token (expires in 1 hour)
-    const token = generateToken();
-    const expiresAt = Date.now() + 60 * 60 * 1000;
+    // Generate new 6-digit code (expires in 10 minutes)
+    const code = generateCode();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
     
     await ctx.db.insert("password_reset_tokens", {
       email,
-      token,
+      code,
       expires_at: expiresAt,
       used: false,
+      attempts: 0,
       created_at: Date.now(),
     });
     
     return { 
       success: true, 
-      token, // Return token so HTTP action can send email
-      message: "If an account exists, a reset email will be sent." 
+      code, // Return code so HTTP action can send email
+      message: "If an account exists, a reset code will be sent." 
     };
   },
 });
 
-// Verify token is valid
-export const verifyResetToken = query({
-  args: { token: v.string() },
+// Verify 6-digit code is valid
+export const verifyResetCode = query({
+  args: { code: v.string(), email: v.string() },
   handler: async (ctx, args) => {
-    const resetToken = await ctx.db
+    const email = args.email.toLowerCase().trim();
+    const code = args.code.trim();
+    
+    const resetCode = await ctx.db
       .query("password_reset_tokens")
-      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .order("desc")
       .first();
     
-    if (!resetToken) {
-      return { valid: false, error: "Invalid reset token" };
+    if (!resetCode) {
+      return { valid: false, error: "Invalid reset code" };
     }
     
-    if (resetToken.used) {
-      return { valid: false, error: "This reset link has already been used" };
+    if (resetCode.used) {
+      return { valid: false, error: "This code has already been used" };
     }
     
-    if (resetToken.expires_at < Date.now()) {
-      return { valid: false, error: "This reset link has expired" };
+    if (resetCode.expires_at < Date.now()) {
+      return { valid: false, error: "This code has expired" };
     }
     
-    return { valid: true, email: resetToken.email };
+    if (resetCode.attempts >= 5) {
+      return { valid: false, error: "Too many failed attempts. Please request a new code." };
+    }
+    
+    if (resetCode.code !== code) {
+      return { valid: false, error: "Invalid code" };
+    }
+    
+    return { valid: true, email: resetCode.email };
   },
 });
 
-// Reset password with token
+// Increment failed attempts
+export const incrementAttempts = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = args.email.toLowerCase().trim();
+    
+    const resetCode = await ctx.db
+      .query("password_reset_tokens")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .order("desc")
+      .first();
+    
+    if (resetCode && !resetCode.used) {
+      await ctx.db.patch(resetCode._id, { 
+        attempts: resetCode.attempts + 1 
+      });
+    }
+  },
+});
+
+// Reset password with code
 export const resetPassword = mutation({
   args: { 
-    token: v.string(),
+    email: v.string(),
+    code: v.string(),
     new_password: v.string(),
   },
   handler: async (ctx, args) => {
+    const email = args.email.toLowerCase().trim();
+    const code = args.code.trim();
+    
     // Validate password
     if (args.new_password.length < 6) {
       throw new Error("Password must be at least 6 characters");
     }
     
-    // Find and validate token
-    const resetToken = await ctx.db
+    // Find and validate code
+    const resetCode = await ctx.db
       .query("password_reset_tokens")
-      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .order("desc")
       .first();
     
-    if (!resetToken) {
-      throw new Error("Invalid reset token");
+    if (!resetCode) {
+      throw new Error("Invalid reset code");
     }
     
-    if (resetToken.used) {
-      throw new Error("This reset link has already been used");
+    if (resetCode.used) {
+      throw new Error("This code has already been used");
     }
     
-    if (resetToken.expires_at < Date.now()) {
-      throw new Error("This reset link has expired");
+    if (resetCode.expires_at < Date.now()) {
+      throw new Error("This code has expired");
+    }
+    
+    if (resetCode.code !== code) {
+      // Increment attempts
+      await ctx.db.patch(resetCode._id, { 
+        attempts: resetCode.attempts + 1 
+      });
+      throw new Error("Invalid code");
     }
     
     // Find user
     const user = await ctx.db
       .query("users")
-      .withIndex("by_email", (q) => q.eq("email", resetToken.email))
+      .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     
     if (!user) {
@@ -134,8 +175,8 @@ export const resetPassword = mutation({
       updatedAt: Date.now(),
     });
     
-    // Mark token as used
-    await ctx.db.patch(resetToken._id, { used: true });
+    // Mark code as used
+    await ctx.db.patch(resetCode._id, { used: true });
     
     return { success: true, message: "Password has been reset successfully" };
   },

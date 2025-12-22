@@ -13,7 +13,6 @@ import Volunteer from "./pages/Volunteer";
 import FAQ from "./pages/FAQ";
 import Auth from "./pages/Auth";
 import Admin from "./pages/Admin";
-import ResetPassword from "./pages/ResetPassword";
 
 
 function App() {
@@ -21,7 +20,6 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/auth" element={<Auth />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<Index />} />
