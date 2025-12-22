@@ -20,9 +20,9 @@ http.route({
       const BREVO_API_KEY = process.env.BREVO_API_KEY;
       // Optional overrides for sender configuration
       // @ts-ignore
-      const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || "noreply@tooffoundation.org";
+      const BREVO_SENDER_EMAIL = process.env.BREVO_SENDER_EMAIL || "shawolhorizon@gmail.com";
       // @ts-ignore
-      const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || "TOOF Foundation";
+      const BREVO_SENDER_NAME = process.env.BREVO_SENDER_NAME || "The Olanike Omopariola Foundation";
       
       if (!BREVO_API_KEY) {
         console.error("BREVO_API_KEY not configured");
