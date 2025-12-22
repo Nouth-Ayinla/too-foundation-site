@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useConvex } from "convex/react";
+import { useMutation, useQuery, useConvex } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL;
@@ -40,7 +40,7 @@ const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> => {
   ]);
 };
 
-type AuthView = "signin" | "signup" | "forgot";
+type AuthView = "signin" | "signup" | "forgot" | "verify-code" | "reset-password";
 type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "error";
 
 // Inner component that uses Convex hooks (only rendered when Convex is available)
@@ -50,6 +50,7 @@ const AuthWithConvex = () => {
   const [view, setView] = useState<AuthView>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -57,10 +58,25 @@ const AuthWithConvex = () => {
   const [successMessage, setSuccessMessage] = useState("");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [retryCount, setRetryCount] = useState(0);
+  
+  // OTP Code state
+  const [otpCode, setOtpCode] = useState(["", "", "", "", "", ""]);
+  const [resendCountdown, setResendCountdown] = useState(0);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const signup = useMutation(api.auth.signup);
   const signin = useMutation(api.auth.signin);
   const requestPasswordReset = useMutation(api.passwordReset.requestPasswordReset);
+  const resetPassword = useMutation(api.passwordReset.resetPassword);
+  const incrementAttempts = useMutation(api.passwordReset.incrementAttempts);
+
+  // Resend countdown timer
+  useEffect(() => {
+    if (resendCountdown > 0) {
+      const timer = setTimeout(() => setResendCountdown(resendCountdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCountdown]);
 
   // Monitor connection status
   useEffect(() => {
@@ -107,6 +123,168 @@ const AuthWithConvex = () => {
     }, 1000);
   }, [convex]);
 
+  // Handle OTP input change
+  const handleOtpChange = (index: number, value: string) => {
+    if (!/^\d*$/.test(value)) return; // Only allow digits
+    
+    const newOtp = [...otpCode];
+    newOtp[index] = value.slice(-1); // Only take last character
+    setOtpCode(newOtp);
+    
+    // Auto-focus next input
+    if (value && index < 5) {
+      inputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  // Handle backspace in OTP input
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === "Backspace" && !otpCode[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  // Handle paste in OTP input
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    const newOtp = [...otpCode];
+    for (let i = 0; i < pastedData.length; i++) {
+      newOtp[i] = pastedData[i];
+    }
+    setOtpCode(newOtp);
+    // Focus last filled input or the next empty one
+    const focusIndex = Math.min(pastedData.length, 5);
+    inputRefs.current[focusIndex]?.focus();
+  };
+
+  const sendResetCode = async () => {
+    setError("");
+    setLoading(true);
+
+    const emailError = validateEmail(email);
+    if (emailError) {
+      setError(emailError);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const result = await withTimeout(
+        requestPasswordReset({ email: email.trim() }),
+        MUTATION_TIMEOUT
+      );
+      
+      if (result.code) {
+        // Send email via HTTP action
+        await withTimeout(
+          fetch(`${import.meta.env.VITE_CONVEX_URL?.replace('.cloud', '.site')}/send-reset-email`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: email.trim(),
+              code: result.code,
+            }),
+          }),
+          MUTATION_TIMEOUT
+        );
+      }
+      
+      setView("verify-code");
+      setResendCountdown(60);
+      setOtpCode(["", "", "", "", "", ""]);
+      setSuccess(true);
+      setSuccessMessage("A 6-digit code has been sent to your email.");
+    } catch (err: any) {
+      setError(err.message || "Failed to send reset code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyCode = async () => {
+    setError("");
+    const code = otpCode.join("");
+    
+    if (code.length !== 6) {
+      setError("Please enter the complete 6-digit code");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      // Verify code using query
+      const verification = await withTimeout(
+        convex.query(api.passwordReset.verifyResetCode, { 
+          code, 
+          email: email.trim() 
+        }),
+        MUTATION_TIMEOUT
+      );
+
+      if (!verification.valid) {
+        await incrementAttempts({ email: email.trim() });
+        setError(verification.error || "Invalid code");
+        setLoading(false);
+        return;
+      }
+
+      setView("reset-password");
+      setSuccess(true);
+      setSuccessMessage("Code verified! Please enter your new password.");
+    } catch (err: any) {
+      setError(err.message || "Failed to verify code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    setError("");
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      await withTimeout(
+        resetPassword({
+          email: email.trim(),
+          code: otpCode.join(""),
+          new_password: password,
+        }),
+        MUTATION_TIMEOUT
+      );
+
+      setSuccess(true);
+      setSuccessMessage("Password reset successfully! Redirecting to sign in...");
+      
+      setTimeout(() => {
+        setView("signin");
+        setEmail("");
+        setPassword("");
+        setConfirmPassword("");
+        setOtpCode(["", "", "", "", "", ""]);
+        setSuccess(false);
+        setSuccessMessage("");
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Failed to reset password");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -122,31 +300,8 @@ const AuthWithConvex = () => {
 
     try {
       if (view === "forgot") {
-        // Request password reset with timeout
-        const result = await withTimeout(
-          requestPasswordReset({ email: email.trim() }),
-          MUTATION_TIMEOUT
-        );
-        
-        if (result.token) {
-          // Send email via HTTP action
-          const resetUrl = `${window.location.origin}/reset-password`;
-          await withTimeout(
-            fetch(`${import.meta.env.VITE_CONVEX_URL?.replace('.cloud', '.site')}/send-reset-email`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                email: email.trim(),
-                token: result.token,
-                resetUrl,
-              }),
-            }),
-            MUTATION_TIMEOUT
-          );
-        }
-        
-        setSuccess(true);
-        setSuccessMessage("If an account exists with this email, you will receive a password reset link shortly.");
+        await sendResetCode();
+        return;
       } else if (view === "signup") {
         // Validate password and name for signup
         const passwordError = validatePassword(password);
@@ -231,6 +386,9 @@ const AuthWithConvex = () => {
     setError("");
     setSuccess(false);
     setSuccessMessage("");
+    setPassword("");
+    setConfirmPassword("");
+    setOtpCode(["", "", "", "", "", ""]);
   };
 
   const getConnectionStatusDisplay = () => {
@@ -248,6 +406,26 @@ const AuthWithConvex = () => {
   };
 
   const statusDisplay = getConnectionStatusDisplay();
+
+  const getTitle = () => {
+    switch (view) {
+      case "signup": return "Create Account";
+      case "forgot": return "Reset Password";
+      case "verify-code": return "Enter Code";
+      case "reset-password": return "New Password";
+      default: return "Welcome back!";
+    }
+  };
+
+  const getSubtitle = () => {
+    switch (view) {
+      case "signup": return "Please fill in your details to create an account";
+      case "forgot": return "Enter your email and we'll send you a 6-digit code";
+      case "verify-code": return `Enter the 6-digit code sent to ${email}`;
+      case "reset-password": return "Enter your new password";
+      default: return "Please enter your credentials to sign in!";
+    }
+  };
 
   return (
     <div className="min-h-screen flex">
@@ -306,14 +484,10 @@ const AuthWithConvex = () => {
           </div>
 
           <h1 className="text-3xl font-bold text-foreground mb-2">
-            {view === "signup" ? "Create Account" : view === "forgot" ? "Reset Password" : "Welcome back!"}
+            {getTitle()}
           </h1>
           <p className="text-muted-foreground mb-8">
-            {view === "signup"
-              ? "Please fill in your details to create an account"
-              : view === "forgot"
-              ? "Enter your email and we'll send you a reset link"
-              : "Please enter your credentials to sign in!"}
+            {getSubtitle()}
           </p>
 
           {/* Connection Status Indicator */}
@@ -358,135 +532,265 @@ const AuthWithConvex = () => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {view === "signup" && (
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter your full name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
-                  required
-                  disabled={loading}
-                  maxLength={100}
-                />
+          {/* Verify Code View */}
+          {view === "verify-code" && (
+            <div className="space-y-6">
+              <div className="flex justify-center gap-2">
+                {otpCode.map((digit, index) => (
+                  <input
+                    key={index}
+                    ref={(el) => (inputRefs.current[index] = el)}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={1}
+                    value={digit}
+                    onChange={(e) => handleOtpChange(index, e.target.value)}
+                    onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                    onPaste={handleOtpPaste}
+                    className="w-12 h-14 text-center text-2xl font-bold border-2 border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground"
+                    disabled={loading}
+                  />
+                ))}
               </div>
-            )}
 
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Email Address
-              </label>
-              <input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
-                required
-                disabled={loading}
-                maxLength={255}
-              />
-            </div>
+              <button
+                type="button"
+                onClick={verifyCode}
+                className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={loading || otpCode.join("").length !== 6}
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Verifying...</span>
+                  </>
+                ) : "Verify Code"}
+              </button>
 
-            {view !== "forgot" && (
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
-                  required
-                  disabled={loading}
-                  maxLength={100}
-                />
-                {view === "signup" && (
-                  <small className="text-muted-foreground block mt-1">
-                    At least 6 characters
-                  </small>
-                )}
-              </div>
-            )}
-
-            {view === "signin" && (
-              <div className="text-right">
+              <div className="text-center space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Didn't receive the code?
+                </p>
                 <button
                   type="button"
-                  onClick={() => switchView("forgot")}
-                  className="text-sm text-green hover:text-green-dark transition-colors"
+                  onClick={sendResetCode}
+                  disabled={resendCountdown > 0 || loading}
+                  className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Forgot password?
+                  {resendCountdown > 0 ? `Resend in ${resendCountdown}s` : "Resend Code"}
                 </button>
               </div>
-            )}
 
-            <button
-              type="submit"
-              className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              disabled={loading || connectionStatus === "error"}
-            >
-              {loading ? (
-                <>
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  <span>{connectionStatus === "reconnecting" ? "Reconnecting..." : "Please wait..."}</span>
-                </>
-              ) : view === "signup" 
-                ? "Create Account" 
-                : view === "forgot"
-                ? "Send Reset Link"
-                : "Sign In"}
-            </button>
-          </form>
-
-          <div className="mt-6 text-center space-y-2">
-            {view === "forgot" ? (
               <button
                 type="button"
                 onClick={() => switchView("signin")}
                 disabled={loading}
-                className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full text-center text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50"
               >
                 Back to Sign In
               </button>
-            ) : (
+            </div>
+          )}
+
+          {/* Reset Password View */}
+          {view === "reset-password" && (
+            <div className="space-y-5">
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Enter new password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
+                  disabled={loading}
+                  maxLength={100}
+                />
+                <small className="text-muted-foreground block mt-1">
+                  At least 6 characters
+                </small>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
+                  disabled={loading}
+                  maxLength={100}
+                />
+              </div>
+
               <button
                 type="button"
-                onClick={() => switchView(view === "signup" ? "signin" : "signup")}
-                disabled={loading}
-                className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handlePasswordReset}
+                className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={loading || !password || !confirmPassword}
               >
-                {view === "signup"
-                  ? "Already have an account? Sign In"
-                  : "Don't have an account? Sign Up"}
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Resetting...</span>
+                  </>
+                ) : "Reset Password"}
               </button>
-            )}
-          </div>
+
+              <button
+                type="button"
+                onClick={() => switchView("signin")}
+                disabled={loading}
+                className="w-full text-center text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50"
+              >
+                Back to Sign In
+              </button>
+            </div>
+          )}
+
+          {/* Sign In, Sign Up, Forgot Password Forms */}
+          {(view === "signin" || view === "signup" || view === "forgot") && (
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {view === "signup" && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter your full name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
+                    required
+                    disabled={loading}
+                    maxLength={100}
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Email Address
+                </label>
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
+                  required
+                  disabled={loading}
+                  maxLength={255}
+                />
+              </div>
+
+              {view !== "forgot" && (
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2">
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-4 py-3 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-green focus:border-transparent transition-all bg-background text-foreground placeholder:text-muted-foreground"
+                    required
+                    disabled={loading}
+                    maxLength={100}
+                  />
+                  {view === "signup" && (
+                    <small className="text-muted-foreground block mt-1">
+                      At least 6 characters
+                    </small>
+                  )}
+                </div>
+              )}
+
+              {view === "signin" && (
+                <div className="text-right">
+                  <button
+                    type="button"
+                    onClick={() => switchView("forgot")}
+                    className="text-sm text-green hover:text-green-dark transition-colors"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-green text-white rounded-lg font-semibold hover:bg-green-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                disabled={loading || connectionStatus === "error"}
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>{connectionStatus === "reconnecting" ? "Reconnecting..." : "Please wait..."}</span>
+                  </>
+                ) : view === "signup" 
+                  ? "Create Account" 
+                  : view === "forgot"
+                  ? "Send Code"
+                  : "Sign In"}
+              </button>
+
+              <div className="mt-6 text-center space-y-2">
+                {view === "forgot" ? (
+                  <button
+                    type="button"
+                    onClick={() => switchView("signin")}
+                    disabled={loading}
+                    className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Back to Sign In
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => switchView(view === "signup" ? "signin" : "signup")}
+                    disabled={loading}
+                    className="text-green hover:text-green-dark transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {view === "signup"
+                      ? "Already have an account? Sign In"
+                      : "Don't have an account? Sign Up"}
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
-// Main Auth component that checks for Convex availability
+// Wrapper component to check if Convex is configured
 const Auth = () => {
   if (!convexUrl) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-8">
-        <div className="text-center max-w-md">
-          <h1 className="text-2xl font-bold text-foreground mb-4">Configuration Required</h1>
-          <p className="text-muted-foreground">
-            Authentication is not available. Please configure Convex to enable this feature.
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="bg-destructive/10 border border-destructive/30 text-destructive p-6 rounded-lg max-w-md text-center">
+          <h2 className="text-lg font-semibold mb-2">Configuration Error</h2>
+          <p className="text-sm">
+            Convex is not configured. Please check that VITE_CONVEX_URL is set in your environment variables.
           </p>
         </div>
       </div>
