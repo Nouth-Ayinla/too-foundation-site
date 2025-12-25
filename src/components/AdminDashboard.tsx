@@ -70,14 +70,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ userEmail }) => {
     status: "draft" | "published"
   ) => {
     try {
-      const startDate = new Date(`${data.date}T${data.time}`).getTime();
+      const startDate = new Date(`${data.date}T${data.time || "00:00"}`).getTime();
       await createEvent({
         admin_email: userEmail,
         title: data.title,
         slug: generateSlug(data.title),
-        description: data.description || data.subHeading,
+        description: data.subHeading,
         start_date: startDate,
-        location: data.location || "TBD",
+        location: "TBD",
       });
       alert(
         `Event ${status === "published" ? "published" : "saved"} successfully!`
