@@ -173,9 +173,10 @@ const BlogEditor: React.FC<BlogEditorProps> = ({
             Publish Date
           </label>
           <input
-            type="date"
+            type="text"
             value={publishDate}
             onChange={(e) => setPublishDate(e.target.value)}
+            placeholder="e.g. January 15, 2025"
             className="w-full px-3 py-2 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-navy/20 focus:border-navy"
           />
         </div>
