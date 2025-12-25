@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import MobileMenu from './MobileMenu';
+import { useState, useEffect } from "react";
+import { Link, useLocation } from "react-router-dom";
+import MobileMenu from "./MobileMenu";
 
 const navLinks = [
-  { href: '/', label: 'Home' },
-  { href: '/about', label: 'About Us' },
-  { href: '/impact', label: 'Impact' },
-  { href: '/get-involved', label: 'Get Involved' },
-  { href: '/blog', label: 'Blog' },
-  { href: '/contact', label: 'Contact' },
-  { href: '/faq', label: 'FAQ' },
+  { href: "/", label: "Home" },
+  { href: "/about", label: "About Us" },
+  { href: "/impact", label: "Impact" },
+  { href: "/get-involved", label: "Get Involved" },
+  { href: "/blog", label: "Blog" },
+  { href: "/events", label: "Events" },
+  { href: "/contact", label: "Contact" },
+  { href: "/faq", label: "FAQ" },
 ];
 
 const Header = () => {
@@ -21,17 +22,17 @@ const Header = () => {
     const handleScroll = () => {
       setIsScrolled(window.scrollY > 8);
     };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   return (
     <>
       <header
         className={`sticky top-0 z-50 bg-white border-b border-border transition-shadow duration-300 ${
-          isScrolled ? 'shadow-lg' : ''
+          isScrolled ? "shadow-lg" : ""
         }`}
-        style={{ height: 'var(--nav-height)' }}
+        style={{ height: "var(--nav-height)" }}
       >
         <div className="max-w-[1440px] mx-auto h-full flex items-center justify-between px-4 lg:px-8">
           {/* Logo */}
@@ -51,7 +52,9 @@ const Header = () => {
                   <Link
                     to={link.href}
                     className={`uppercase font-semibold text-lg transition-colors hover:text-green ${
-                      location.pathname === link.href ? 'text-green' : 'text-gray-800'
+                      location.pathname === link.href
+                        ? "text-green"
+                        : "text-gray-800"
                     }`}
                   >
                     {link.label}
@@ -66,7 +69,7 @@ const Header = () => {
             <Link
               to="/donate"
               className="btn btn-green px-6 py-3 text-lg font-medium gap-2 hidden sm:flex"
-              style={{ width: '180px', height: '60px', borderRadius: '111px' }}
+              style={{ width: "180px", height: "60px", borderRadius: "111px" }}
             >
               <svg className="w-6 h-6" viewBox="0 0 24 24" aria-hidden="true">
                 <path

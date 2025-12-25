@@ -1,65 +1,44 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-
-const blogPosts = [
-  {
-    slug: 'role-of-advocacy',
-    title: 'ROLE OF ADVOCACY IN VIOLENCE AGAINST WOMEN IN NIGERIA',
-    image: '/assets/images/blog-hero-when-a-girl.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'August 19, 2022',
-    featured: true,
-  },
-  {
-    slug: 'navigating-domestic-violence',
-    title: 'NAVIGATING DOMESTIC VIOLENCE LAWS AND STOCKHOLM SYNDROME IN VICTIMS',
-    image: '/assets/images/NAVIGATING.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'August 19, 2022',
-  },
-  {
-    slug: 'securing-safety',
-    title: 'SECURING SAFETY: A SIMPLE GUIDE TO OBTAINING RESTRAINING ORDERS AND PROTECTIVE MEASURES FOR ABUSED WOMEN IN NIGERIA.',
-    image: '/assets/images/Securing Safety.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'August 19, 2022',
-  },
-  {
-    slug: 'child-custody',
-    title: 'CHILD CUSTODY AND ABUSE: NAVIGATING THE COMPLEXITIES OF CHILD CUSTODY CASES INVOLVING ABUSIVE RELATIONSHIPS AND THE LEGAL STRATEGIES TO PROTECT CHILDREN',
-    image: '/assets/images/CHILD CUSTODY.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'August 19, 2022',
-  },
-  {
-    slug: 'thriving-beyond-abuse',
-    title: "THRIVING BEYOND ABUSE: THE ROLE OF FINANCIAL EMPOWERMENT IN WOMEN'S POST-ABUSE RECOVERY",
-    image: '/assets/images/Thriving Beyond.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'August 19, 2022',
-  },
-  {
-    slug: 'legal-rights',
-    title: 'LEGAL RIGHTS AND OPTIONS FOR WOMEN IN ABUSIVE MARRIAGES AND RELATIONSHIPS IN NIGERIA',
-    image: '/assets/images/Legal Rights.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'August 19, 2022',
-  },
-  {
-    slug: 'recognizing-signs',
-    title: 'RECOGNIZING THE SIGNS OF ABUSE: A GUIDE TO EMPOWERING NIGERIAN WOMEN IN IDENTIFYING HIDDEN VIOLENCE IN RELATIONSHIPS',
-    image: '/assets/images/NAVIGATING.jpg',
-    author: 'Oluwatoyin Omotayo',
-    date: 'July 4, 2022',
-    hidden: true,
-  },
-];
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
 
 const Blog = () => {
   const [showAll, setShowAll] = useState(false);
+
+  // Fetch published blogs from Convex
+  const blogs = useQuery(api.blogs.getPublishedBlogs);
+
+  if (!blogs) {
+    return (
+      <div className="container py-24 text-center">
+        <p className="text-muted-foreground">Loading blogs...</p>
+      </div>
+    );
+  }
+
+  const blogPosts = blogs.map((blog: any) => ({
+    slug: blog.slug,
+    title: blog.title,
+    image: blog.featured_image || "/assets/images/blog-placeholder.jpg",
+    author: blog.author_name || "Oluwatoyin Omotayo",
+    date: blog.published_at
+      ? new Date(blog.published_at).toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
+      : new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+    featured: blog.featured || false,
+  }));
+
   const featuredPost = blogPosts.find((p) => p.featured);
   const regularPosts = blogPosts.filter((p) => !p.featured);
-  const visiblePosts = showAll ? regularPosts : regularPosts.filter((p) => !p.hidden);
+  const visiblePosts = showAll ? regularPosts : regularPosts.slice(0, 6);
 
   return (
     <>
@@ -98,10 +77,7 @@ const Blog = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {visiblePosts.map((post) => (
               <article key={post.slug}>
-                <Link
-                  to={`/blog/${post.slug}`}
-                  className="block group"
-                >
+                <Link to={`/blog/${post.slug}`} className="block group">
                   <div className="relative h-[200px] lg:h-[240px] rounded-xl overflow-hidden mb-4">
                     <img
                       src={post.image}
@@ -123,13 +99,13 @@ const Blog = () => {
           </div>
 
           {/* Load More */}
-          {regularPosts.some((p) => p.hidden) && (
+          {regularPosts.length > 6 && (
             <div className="text-center mt-12">
               <button
                 onClick={() => setShowAll(!showAll)}
                 className="btn bg-foreground text-background px-8 py-4 text-lg hover:bg-foreground/80 transition-colors"
               >
-                {showAll ? 'Show Less' : 'Load More'}
+                {showAll ? "Show Less" : "Load More"}
               </button>
             </div>
           )}

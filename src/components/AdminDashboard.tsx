@@ -34,42 +34,56 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ userEmail }) => {
   const generateSlug = (title: string): string => {
     return title
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
   };
 
-  const handleBlogSave = async (data: BlogFormData, status: 'draft' | 'published') => {
+  const handleBlogSave = async (
+    data: BlogFormData,
+    status: "draft" | "published"
+  ) => {
     try {
+      const publishDate = data.publishDate
+        ? new Date(data.publishDate).getTime()
+        : Date.now();
       await createBlog({
         admin_email: userEmail,
         title: data.title,
         slug: generateSlug(data.title),
-        excerpt: data.content.substring(0, 150).replace(/<[^>]*>/g, ''),
+        excerpt: data.content.substring(0, 150).replace(/<[^>]*>/g, ""),
         content: data.content,
         featured_image: data.coverImage || undefined,
         tags: [],
         status,
+        publish_date: publishDate,
       });
-      alert(`Blog ${status === 'published' ? 'published' : 'saved'} successfully!`);
+      alert(
+        `Blog ${status === "published" ? "published" : "saved"} successfully!`
+      );
     } catch (error: any) {
-      alert(error.message || 'Failed to save blog');
+      alert(error.message || "Failed to save blog");
     }
   };
 
-  const handleEventSave = async (data: EventFormData, status: 'draft' | 'published') => {
+  const handleEventSave = async (
+    data: EventFormData,
+    status: "draft" | "published"
+  ) => {
     try {
       const startDate = new Date(`${data.date}T${data.time}`).getTime();
       await createEvent({
         admin_email: userEmail,
         title: data.title,
         slug: generateSlug(data.title),
-        description: data.subHeading,
+        description: data.description || data.subHeading,
         start_date: startDate,
-        location: 'TBD',
+        location: data.location || "TBD",
       });
-      alert(`Event ${status === 'published' ? 'published' : 'saved'} successfully!`);
+      alert(
+        `Event ${status === "published" ? "published" : "saved"} successfully!`
+      );
     } catch (error: any) {
-      alert(error.message || 'Failed to save event');
+      alert(error.message || "Failed to save event");
     }
   };
 
@@ -95,11 +109,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ userEmail }) => {
         {activeTab === "blogs" && (
           <BlogEditor onSave={handleBlogSave} authorName="Oluwatoyin Omotayo" />
         )}
-        
-        {activeTab === "events" && (
-          <EventEditor onSave={handleEventSave} />
-        )}
-        
+
+        {activeTab === "events" && <EventEditor onSave={handleEventSave} />}
+
         {activeTab === "users" && (
           <UserManager
             users={users as any}

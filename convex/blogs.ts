@@ -12,6 +12,8 @@ export const createBlog = mutation({
     featured_image: v.optional(v.string()),
     tags: v.array(v.string()),
     status: v.union(v.literal("draft"), v.literal("published")),
+    author_name: v.optional(v.string()),
+    publish_date: v.optional(v.number()),
   },
   async handler(ctx, args) {
     // Verify admin
@@ -44,7 +46,7 @@ export const createBlog = mutation({
       featured_image_storage_id: undefined,
       tags: args.tags,
       status: args.status,
-      published_at: args.status === "published" ? Date.now() : undefined,
+      published_at: args.status === "published" ? (args.publish_date || Date.now()) : undefined,
       created_at: Date.now(),
       updated_at: Date.now(),
     });
@@ -132,11 +134,24 @@ export const deleteBlog = mutation({
 // Get all published blogs (public)
 export const getPublishedBlogs = query({
   async handler(ctx) {
-    return await ctx.db
+    const blogs = await ctx.db
       .query("blogs")
       .withIndex("by_status", (q) => q.eq("status", "published"))
       .order("desc")
       .collect();
+    
+    // Enrich blogs with author information
+    const enrichedBlogs = await Promise.all(
+      blogs.map(async (blog) => {
+        const author = await ctx.db.get(blog.author_id);
+        return {
+          ...blog,
+          author_name: author?.name || "Unknown Author",
+        };
+      })
+    );
+    
+    return enrichedBlogs;
   },
 });
 
@@ -144,10 +159,18 @@ export const getPublishedBlogs = query({
 export const getBlogBySlug = query({
   args: { slug: v.string() },
   async handler(ctx, args) {
-    return await ctx.db
+    const blog = await ctx.db
       .query("blogs")
       .withIndex("by_slug", (q) => q.eq("slug", args.slug))
       .first();
+    
+    if (!blog) return null;
+    
+    const author = await ctx.db.get(blog.author_id);
+    return {
+      ...blog,
+      author_name: author?.name || "Unknown Author",
+    };
   },
 });
 
