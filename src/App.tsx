@@ -8,6 +8,7 @@ import GetInvolved from "./pages/GetInvolved";
 import Blog from "./pages/Blog";
 import BlogPost from "./pages/BlogPost";
 import Events from "./pages/Events";
+import EventDetail from "./pages/EventDetail";
 import Contact from "./pages/Contact";
 import Donate from "./pages/Donate";
 import Volunteer from "./pages/Volunteer";
@@ -29,6 +30,7 @@ function App() {
           <Route path="blog" element={<Blog />} />
           <Route path="blog/:slug" element={<BlogPost />} />
           <Route path="events" element={<Events />} />
+          <Route path="event/:slug" element={<EventDetail />} />
           <Route path="contact" element={<Contact />} />
           <Route path="donate" element={<Donate />} />
           <Route path="volunteer" element={<Volunteer />} />

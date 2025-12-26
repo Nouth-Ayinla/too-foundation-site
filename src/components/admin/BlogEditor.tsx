@@ -1,9 +1,12 @@
 import React, { useState, useRef } from "react";
+import { sanitizeHtml } from "../../lib/sanitize";
 
 interface BlogEditorProps {
   onSave: (data: BlogFormData, status: "draft" | "published") => void;
+  onDelete?: () => void;
   initialData?: BlogFormData;
   authorName?: string;
+  isEditing?: boolean;
 }
 
 export interface BlogFormData {
@@ -16,8 +19,10 @@ export interface BlogFormData {
 
 const BlogEditor: React.FC<BlogEditorProps> = ({
   onSave,
+  onDelete,
   initialData,
   authorName = "Oluwatoyin Omotayo",
+  isEditing = false,
 }) => {
   const [title, setTitle] = useState(initialData?.title || "");
   const [content, setContent] = useState(initialData?.content || "");
@@ -39,7 +44,9 @@ const BlogEditor: React.FC<BlogEditorProps> = ({
 
   const handleContentChange = () => {
     if (contentRef.current) {
-      setContent(contentRef.current.innerHTML);
+      // Sanitize the HTML content before storing
+      const sanitized = sanitizeHtml(contentRef.current.innerHTML);
+      setContent(sanitized);
     }
   };
 
@@ -237,15 +244,25 @@ const BlogEditor: React.FC<BlogEditorProps> = ({
             disabled={isSaving || !title}
             className="flex-1 px-4 md:px-6 py-2 md:py-3 bg-[#4a4a4a] text-white text-sm md:text-base font-medium rounded-md hover:bg-[#3a3a3a] transition-colors disabled:opacity-50"
           >
-            Save
+            {isEditing ? "Update" : "Save"}
           </button>
           <button
             onClick={() => handleSubmit("published")}
             disabled={isSaving || !title}
             className="flex-1 px-4 md:px-6 py-2 md:py-3 bg-green text-white text-sm md:text-base font-medium rounded-md hover:bg-green-dark transition-colors disabled:opacity-50"
           >
-            Publish
+            {isEditing ? "Update & Publish" : "Publish"}
           </button>
+          {isEditing && onDelete && (
+            <button
+              onClick={onDelete}
+              disabled={isSaving}
+              className="px-4 md:px-6 py-2 md:py-3 bg-red-600 text-white text-sm md:text-base font-medium rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+              title="Delete this blog post"
+            >
+              Delete
+            </button>
+          )}
         </div>
       </div>
     </div>
